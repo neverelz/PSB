@@ -1,59 +1,51 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import roc_auc_score
 
-# Шаг 1: Загрузка данных
-file_path = '../train.xlsx'  # Укажите путь к вашему файлу
-data = pd.read_excel(file_path)
+# Step 1: Load the data
+data = pd.read_excel("../train.xlsx")
 
-# Шаг 2: Обработка данных
-data['cancellation'] = data['Дата отмены'].notnull().astype(int)
+# Step 2: Data Preprocessing
+# Convert dates to datetime
+data['Дата бронирования'] = pd.to_datetime(data['Дата бронирования'])
+data['Дата отмены'] = pd.to_datetime(data['Дата отмены'], errors='coerce')
+data['Заезд'] = pd.to_datetime(data['Заезд'])
+data['Выезд'] = pd.to_datetime(data['Выезд'])
 
-X = data.drop(['№ брони', 'Дата бронирования', 'Дата отмены', 'Заезд', 'Выезд', 'cancellation'], axis=1)
-y = data['cancellation']
+# Create target variable
+data['Целевое поле'] = data['Дата отмены'].notnull().astype(int)
 
-# One-Hot Encoding для категориальных признаков
-categorical_features = ['Способ оплаты', 'Источник', 'Статус брони', 'Категория номера', 'Гостиница']
-encoder = OneHotEncoder(drop='first', sparse_output=False)
-encoded_categorical = encoder.fit_transform(X[categorical_features])
+# Drop unnecessary columns
+data.drop(columns=['№ брони', 'Дата отмены', 'Статус брони'], inplace=True)
 
-encoded_categorical_df = pd.DataFrame(encoded_categorical, columns=encoder.get_feature_names_out())
-X = X.drop(categorical_features, axis=1)
-X = pd.concat([X.reset_index(drop=True), encoded_categorical_df.reset_index(drop=True)], axis=1)
+# Handle categorical variables
+data = pd.get_dummies(data, drop_first=True)
 
-# Масштабирование числовых признаков
-scaler = StandardScaler()
-numerical_features = ['Номеров', 'Стоимость', 'Ночей', 'Гостей']
-X[numerical_features] = scaler.fit_transform(X[numerical_features])
+# Step 3: Feature Engineering
+# Example: Create a feature for the length of stay
+data['length_of_stay'] = (data['Выезд'] - data['Заезд']).dt.days
 
-# Шаг 3: Разделение данных на обучающую и тестовую выборки
+# Convert datetime columns to numerical features (e.g., timestamps)
+data['Дата бронирования'] = data['Дата бронирования'].astype(int) // 10**9  # Convert to seconds
+data['Заезд'] = data['Заезд'].astype(int) // 10**9  # Convert to seconds
+data['Выезд'] = data['Выезд'].astype(int) // 10**9  # Convert to seconds
+
+# Step 4: Train the model
+X = data.drop(columns=['Целевое поле'])
+y = data['Целевое поле']
+
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Шаг 4: Обучение модели случайного леса с подбором гиперпараметров
-param_grid = {
-    'n_estimators': [100, 200],
-    'max_depth': [10, 20, 30],
-}
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
 
-grid_search = GridSearchCV(RandomForestClassifier(), param_grid, cv=5)
-grid_search.fit(X_train, y_train)
+# Step 5: Evaluate the model
+y_pred = model.predict(X_test)
+roc_auc = roc_auc_score(y_test, y_pred)
 
-# Лучшая модель случайного леса
-best_rf_model = grid_search.best_estimator_
+print(f'ROC-AUC Score: {roc_auc}')
 
-# Шаг 5: Предсказания и оценка случайного леса
-y_pred_rf = best_rf_model.predict(X_test)
-
-print("\nСлучайный лес:")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_rf)}")
-print(f"Precision: {precision_score(y_test, y_pred_rf)}")
-print(f"Recall: {recall_score(y_test, y_pred_rf)}")
-print(f"F1-Score: {f1_score(y_test, y_pred_rf)}")
-
-# Шаг 6: Сохранение предсказаний в CSV файл
-results_df = pd.DataFrame({'Predictions': y_pred_rf})
-results_df.to_csv('../answer.csv', header=False, index=False)
+# Save the output
+output = pd.DataFrame({'Predictions': y_pred})
+output.to_csv('../answer.csv', header=False, index=False, sep=',')

@@ -1,57 +1,74 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
+# Шаг 1: Загрузка тренировочного набора данных
+train_data = pd.read_excel("../train.xlsx")
 
-data = pd.read_excel("../train.xlsx")
+# Шаг 2: Преобразование дат и целевой переменной
+train_data['Дата бронирования'] = pd.to_datetime(train_data['Дата бронирования'])
+train_data['Дата отмены'] = pd.to_datetime(train_data['Дата отмены'], errors='coerce')
+train_data['Заезд'] = pd.to_datetime(train_data['Заезд'])
+train_data['Выезд'] = pd.to_datetime(train_data['Выезд'])
 
+# Целевая переменная: отменено бронирование или нет
+train_data['Целевое поле'] = train_data['Дата отмены'].notnull().astype('int64')
 
-# Convert dates to datetime
-data['Дата бронирования'] = pd.to_datetime(data['Дата бронирования'])
-data['Дата отмены'] = pd.to_datetime(data['Дата отмены'], errors='coerce')
-data['Заезд'] = pd.to_datetime(data['Заезд'])
-data['Выезд'] = pd.to_datetime(data['Выезд'])
+# Удаление ненужных колонок
+train_data.drop(columns=['№ брони', 'Дата отмены', 'Статус брони'], inplace=True)
 
-# Create target variable
-data['Целевое поле'] = data['Дата отмены'].notnull().astype(int)
+# One-hot encoding для категориальных переменных
+train_data = pd.get_dummies(train_data, drop_first=True)
 
-# Drop unnecessary columns
-data.drop(columns=['№ брони', 'Дата отмены', 'Статус брони'], inplace=True)
+# Создание признака "длительность пребывания"
+train_data['length_of_stay'] = (train_data['Выезд'] - train_data['Заезд']).dt.days
 
-# Handle categorical variables
-data = pd.get_dummies(data, drop_first=True)
+# Преобразование дат в секунды
+train_data['Дата бронирования'] = train_data['Дата бронирования'].astype('int64') // 10**9
+train_data['Заезд'] = train_data['Заезд'].astype('int64') // 10**9
+train_data['Выезд'] = train_data['Выезд'].astype('int64') // 10**9
 
-# Step 3: Feature Engineering
-# Example: Create a feature for the length of stay
-data['length_of_stay'] = (data['Выезд'] - data['Заезд']).dt.days
+# Разделение на признаки и целевую переменную
+X_train = train_data.drop(columns=['Целевое поле'])
+y_train = train_data['Целевое поле']
 
-
-data['Дата бронирования'] = data['Дата бронирования'].astype(int) // 10**9  # Convert to seconds
-data['Заезд'] = data['Заезд'].astype(int) // 10**9  # Convert to seconds
-data['Выезд'] = data['Выезд'].astype(int) // 10**9  # Convert to seconds
-
-
-X = data.drop(columns=['Целевое поле'])
-y = data['Целевое поле']
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.001, random_state=0)
-
+# Обучение модели
 model = RandomForestClassifier(random_state=0)
 model.fit(X_train, y_train)
 
-# Step 5: Evaluate the model
-y_pred = model.predict(X_test)
-roc_auc = roc_auc_score(y_test, y_pred)
-print(f'ROC-AUC Score: {roc_auc}')
+print("Модель обучена на тренировочном наборе данных")
 
-X_full = data.drop(columns=['Целевое поле'])
-full_predictions = model.predict(X_full)
-data['Предсказания'] = full_predictions
+test_data = pd.read_excel("../test.xlsx")
 
-# Save the output
-output = pd.DataFrame({'Предсказания': full_predictions})
-output.to_csv('../answer.csv', index=False, header=False, sep=',')
+# Шаг 4: Преобразование дат и признаков
+test_data['Дата бронирования'] = pd.to_datetime(test_data['Дата бронирования'])
+test_data['Заезд'] = pd.to_datetime(test_data['Заезд'])
+test_data['Выезд'] = pd.to_datetime(test_data['Выезд'])
 
+# Создание признака "длительность пребывания"
+test_data['length_of_stay'] = (test_data['Выезд'] - test_data['Заезд']).dt.days
+
+# Преобразование дат в секунды
+test_data['Дата бронирования'] = test_data['Дата бронирования'].astype('int64') // 10**9
+test_data['Заезд'] = test_data['Заезд'].astype('int64') // 10**9
+test_data['Выезд'] = test_data['Выезд'].astype('int64') // 10**9
+
+# One-hot encoding для категориальных переменных
+test_data = pd.get_dummies(test_data, drop_first=True)
+
+# Приведение нового набора данных к той же структуре, что и тренировочный
+missing_cols = set(X_train.columns) - set(test_data.columns)
+for col in missing_cols:
+    test_data[col] = 0
+test_data = test_data[X_train.columns]
+
+# Шаг 5: Предсказание
+predictions = model.predict(test_data)
+
+# Сохранение результата
+test_data['Предсказания'] = predictions
+test_data[['Предсказания']].to_csv('../new_predictions.csv', index=False, header=False)
+
+print("Предсказания для нового набора данных сохранены в файл")
 
 

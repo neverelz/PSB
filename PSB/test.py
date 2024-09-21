@@ -40,11 +40,6 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.001, rando
 model = RandomForestClassifier(random_state=0)
 model.fit(X_train, y_train)
 
-# Step 5: Evaluate the model
-y_pred = model.predict(X_test)
-roc_auc = roc_auc_score(y_test, y_pred)
-print(f'ROC-AUC Score: {roc_auc}')
-
 X_full = data.drop(columns=['Целевое поле'])
 full_predictions = model.predict(X_full)
 data['Предсказания'] = full_predictions
@@ -53,5 +48,8 @@ data['Предсказания'] = full_predictions
 output = pd.DataFrame({'Предсказания': full_predictions})
 output.to_csv('../answer.csv', index=False, header=False, sep=',')
 
+# Step 5: Evaluate the model
+y_pred = model.predict(X_test)
+roc_auc = roc_auc_score(y_test, y_pred)
 
-
+print(f'ROC-AUC Score: {roc_auc}')

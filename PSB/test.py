@@ -1,35 +1,90 @@
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-data = pd.read_excel('../test.xlsx')
-df = pd.DataFrame(data)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
 
-# Преобразуем колонки с датами в формат datetime
-df["Дата бронирования"] = pd.to_datetime(df["Дата бронирования"])
-df["Заезд"] = pd.to_datetime(df["Заезд"])
-df["Выезд"] = pd.to_datetime(df["Выезд"])
+# Шаг 1: Загрузка тренировочного набора данных
+train_data = pd.read_excel("../train.xlsx")
 
-# Добавим новые признаки: разница между датой бронирования и заезда
-df["Разница до заезда (дни)"] = (df["Заезд"] - df["Дата бронирования"]).dt.days
-df["Продолжительность пребывания (дни)"] = (df["Выезд"] - df["Заезд"]).dt.days
+# Шаг 2: Преобразование дат и целевой переменной
+train_data['Дата бронирования'] = pd.to_datetime(train_data['Дата бронирования'])
+train_data['Дата отмены'] = pd.to_datetime(train_data['Дата отмены'], errors='coerce')
+train_data['Заезд'] = pd.to_datetime(train_data['Заезд'])
+train_data['Выезд'] = pd.to_datetime(train_data['Выезд'])
 
-df.to_csv('../arrivals.csv', sep=',')
+# Целевая переменная: отменено бронирование или нет
+train_data['Целевое поле'] = train_data['Дата отмены'].notnull().astype('int64')
 
-# Анализ скрытых зависимостей через корреляции числовых переменных
-corr_matrix = df[["Номеров", "Стоимость", "Внесена предоплата", "Ночей", "Гостей", "Гостиница", "Разница до заезда (дни)", "Продолжительность пребывания (дни)"]].corr()
+# Удаление ненужных колонок
+train_data.drop(columns=['№ брони', 'Дата отмены', 'Статус брони'], inplace=True)
 
-# Визуализация корреляционной матрицы
-plt.figure(figsize=(10, 6))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1)
-plt.title('Корреляционная матрица')
-plt.xticks(rotation=45)
-plt.show()
+# One-hot encoding для категориальных переменных
+train_data = pd.get_dummies(train_data, drop_first=True)
 
-# Анализ зависимостей категориальных переменных
-# Например, зависимость между формой оплаты и количеством дней до заезда
-sns.boxplot(x="Способ оплаты", y="Разница до заезда (дни)", data=df)
-plt.title('Разница до заезда в зависимости от способа оплаты')
-plt.xticks(rotation=45)
-plt.show()
+# Создание признаков
+train_data['length_of_stay'] = (train_data['Выезд'] - train_data['Заезд']).dt.days
+train_data['time_to_checkin'] = (train_data['Заезд'] - train_data['Дата бронирования']).dt.days
+train_data['booking_month'] = train_data['Дата бронирования'].dt.month
+train_data['booking_day_of_week'] = train_data['Дата бронирования'].dt.weekday
 
+# Преобразование дат в секунды
+train_data['Дата бронирования'] = train_data['Дата бронирования'].astype('int64') // 10**9
+train_data['Заезд'] = train_data['Заезд'].astype('int64') // 10**9
+train_data['Выезд'] = train_data['Выезд'].astype('int64') // 10**9
 
+# Разделение на признаки и целевую переменную
+X_train = train_data.drop(columns=['Целевое поле'])
+y_train = train_data['Целевое поле']
+
+# Инициализация модели с лучшими гиперпараметрами
+best_model = RandomForestClassifier(
+    n_estimators=300,
+    max_depth=20,
+    min_samples_split=10,
+    min_samples_leaf=1,
+    random_state=0
+)
+
+# Обучение модели
+best_model.fit(X_train, y_train)
+
+# Оценка ROC AUC на обучающей выборке
+y_train_pred_proba = best_model.predict_proba(X_train)[:, 1]
+roc_auc_train = roc_auc_score(y_train, y_train_pred_proba)
+print(f"ROC AUC на обучающей выборке: {roc_auc_train:.4f}")
+
+# Шаг 3: Работа с новыми тестовыми данными
+test_data = pd.read_excel("../test.xlsx")
+
+# Преобразование дат и признаков
+test_data['Дата бронирования'] = pd.to_datetime(test_data['Дата бронирования'])
+test_data['Заезд'] = pd.to_datetime(test_data['Заезд'])
+test_data['Выезд'] = pd.to_datetime(test_data['Выезд'])
+
+# Создание признаков для тестовых данных
+test_data['length_of_stay'] = (test_data['Выезд'] - test_data['Заезд']).dt.days
+test_data['time_to_checkin'] = (test_data['Заезд'] - test_data['Дата бронирования']).dt.days
+test_data['booking_month'] = test_data['Дата бронирования'].dt.month
+test_data['booking_day_of_week'] = test_data['Дата бронирования'].dt.weekday
+
+# Преобразование дат в секунды
+test_data['Дата бронирования'] = test_data['Дата бронирования'].astype('int64') // 10**9
+test_data['Заезд'] = test_data['Заезд'].astype('int64') // 10**9
+test_data['Выезд'] = test_data['Выезд'].astype('int64') // 10**9
+
+# One-hot encoding для категориальных переменных
+test_data = pd.get_dummies(test_data, drop_first=True)
+
+# Приведение нового набора данных к той же структуре, что и тренировочный
+missing_cols = set(X_train.columns) - set(test_data.columns)
+for col in missing_cols:
+    test_data[col] = 0
+test_data = test_data[X_train.columns]
+
+# Шаг 4: Предсказание для нового набора данных
+predictions = best_model.predict(test_data)
+
+# Сохранение результата
+test_data['Предсказания'] = predictions
+test_data[['Предсказания']].to_csv('../new_predictions.csv', index=False, header=False)
+
+print("Предсказания для нового набора данных сохранены в файл")
